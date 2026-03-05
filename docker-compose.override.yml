@@ -1,0 +1,18 @@
+# Configurações para desenvolvimento local
+# Este arquivo é automaticamente mesclado com docker-compose.yml
+
+services:
+  app:
+    container_name: app
+    build:
+      context: .
+      dockerfile: ./Dockerfile.dev
+
+    env_file: env/dev/env.yaml
+
+    volumes:
+      - .:/app
+      - ./output:/app/output
+
+    entrypoint: /entrypoint.sh
+    command: ["python", "-m", "app.cli"]

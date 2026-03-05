@@ -1,0 +1,9 @@
+# Configuração base do serviço
+# Para dev local, usar com docker-compose.override.yml
+
+services:
+  app:
+    build:
+      context: .
+    environment:
+      - PYTHONUNBUFFERED=1
