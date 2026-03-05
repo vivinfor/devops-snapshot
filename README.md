@@ -14,11 +14,13 @@ O azure-snapshot resolve isso: com um único comando, ele extrai os work items d
 - **Agilistas e Scrum Masters**: insumo para retrospectivas e conversas sobre qualidade e impedimentos
 - **Líderes técnicos**: identificação de padrões de retrabalho por responsável e por tipo de item
 
+![Relatório HTML gerado pelo azure-snapshot](report.png)
+
 **O que o relatório mostra:**
 
-- Total de work items e quantos estão concluídos
-- Backlog aberto, agrupado por tipo (Story, Bug, Task, etc.)
-- Proporção de retrabalho e distribuição por responsável
+- Cards de resumo: PBIs em backlog, PBIs concluídos, lead time médio e taxa de retrabalho
+- Gráfico de distribuição de PBIs em backlog por faixa de dias em aberto (0-10, 11-25, 26-35, >35 dias)
+- Gráfico de distribuição de bugs abertos por faixa de dias em aberto
 
 ---
 
@@ -95,7 +97,7 @@ DONE_STATES=Closed,Resolved
 
 ```bash
 make fetch    # extrai work items e salva CSV em output/
-make report   # lê o CSV mais recente e gera output/report.txt
+make report   # lê o CSV mais recente e gera output/report.txt e output/report.html
 ```
 
 **Sem Docker:**
@@ -111,8 +113,18 @@ python -m app.cli report
 
 ```
 app/
-├── cli.py        # entry point dos comandos
-├── config.py     # leitura das variáveis de ambiente
-├── extract.py    # integração com a API do Azure DevOps
-└── transform.py  # cálculo de backlog e retrabalho
+├── cli.py          # entry point dos comandos
+├── config.py       # leitura das variáveis de ambiente
+├── extract.py      # integração com a API do Azure DevOps
+├── transform.py    # cálculo de backlog e retrabalho (gera report.txt)
+└── report_html.py  # geração do relatório HTML com gráficos interativos
+```
+
+Os arquivos gerados ficam em `output/`:
+
+```
+output/
+├── work_items_YYYY-MM-DD.csv   # dados brutos extraídos do Azure DevOps
+├── report.txt                  # relatório em texto
+└── report.html                 # relatório visual com gráficos (abrir no browser)
 ```
