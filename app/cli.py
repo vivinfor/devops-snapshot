@@ -39,11 +39,23 @@ def fetch():
     count = fetch_and_save(str(output_path))
     console.print(f"[green]Done.[/green] {count} work items saved to [bold]{output_path}[/bold]")
 
+    if config.GCS_BUCKET:
+        import pandas as pd
+        from app.storage import upload_to_gcs
+
+        parquet_path = output_dir / f"work_items_{today}.parquet"
+        pd.read_csv(str(output_path)).to_parquet(str(parquet_path), index=False)
+
+        blob_name = f"{config.GCS_PREFIX}/work_items_{today}.parquet"
+        uri = upload_to_gcs(str(parquet_path), config.GCS_BUCKET, blob_name)
+        parquet_path.unlink()
+        console.print(f"  · [cyan]Parquet uploaded to[/cyan] [bold]{uri}[/bold]")
+
 
 @app.command()
 def report():
-    """Lê o CSV mais recente e gera relatório de backlog e retrabalho."""
-    from app.transform import generate_report
+    """Lê o CSV mais recente e gera relatório HTML de backlog e retrabalho."""
+    from app.transform import compute_summary
 
     output_dir = _ensure_output_dir()
     csvs = sorted(output_dir.glob("work_items_*.csv"), reverse=True)
@@ -53,12 +65,11 @@ def report():
         raise typer.Exit(1)
 
     input_path = csvs[0]
-    report_path = output_dir / "report.txt"
 
     from app.report_html import generate_html_report
 
     console.print(f"Generating report from [bold]{input_path.name}[/bold]...")
-    summary = generate_report(str(input_path), str(report_path))
+    summary = compute_summary(str(input_path))
 
     html_path = output_dir / "report.html"
     generate_html_report(str(input_path), str(html_path), summary, config.PROJECT or "Azure DevOps")
@@ -74,9 +85,14 @@ def report():
     table.add_row("Rework %", f"{summary['rework_pct']}%")
 
     console.print(table)
-    console.print(f"[green]Reports saved to[/green] [bold]{output_dir}/[/bold]")
-    console.print(f"  · report.txt")
-    console.print(f"  · report.html [cyan](open in browser)[/cyan]")
+    console.print(f"[green]Report saved to[/green] [bold]{output_dir}/report.html[/bold] [cyan](open in browser)[/cyan]")
+
+    if config.GCS_BUCKET:
+        from app.storage import upload_to_gcs
+
+        blob_name = f"{config.GCS_PREFIX}/report.html"
+        uri = upload_to_gcs(str(html_path), config.GCS_BUCKET, blob_name)
+        console.print(f"  · [cyan]HTML uploaded to[/cyan] [bold]{uri}[/bold]")
 
 
 if __name__ == "__main__":

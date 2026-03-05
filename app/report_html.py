@@ -3,6 +3,7 @@ from datetime import date
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from app.config import DONE_STATES, EXCLUDE_TYPES
 
@@ -32,12 +33,11 @@ def _days_open(df: pd.DataFrame) -> pd.Series:
     return (today - created).dt.days
 
 
-def _chart_faixas(df_open: pd.DataFrame, title: str, first: bool) -> str:
-    """Gráfico de pizza (donut): distribuição percentual por faixa de dias em aberto."""
+def _counts_faixas(df_open: pd.DataFrame) -> pd.DataFrame:
+    """Retorna contagem por faixa de dias em aberto."""
     df_open = df_open.copy()
     df_open["days_open"] = _days_open(df_open)
     df_open["faixa"] = df_open["days_open"].apply(_faixa)
-
     counts = (
         df_open["faixa"]
         .value_counts()
@@ -45,25 +45,41 @@ def _chart_faixas(df_open: pd.DataFrame, title: str, first: bool) -> str:
         .reset_index()
     )
     counts.columns = ["faixa", "count"]
-    counts = counts[counts["count"] > 0]
+    return counts[counts["count"] > 0]
 
-    fig = go.Figure(go.Pie(
-        labels=counts["faixa"],
-        values=counts["count"],
-        hole=0.4,
-        textinfo="label+percent",
-        hovertemplate="%{label}<br>%{value} itens (%{percent})<extra></extra>",
-        sort=False,
-    ))
-    fig.update_layout(
-        title=title,
-        height=380,
-        margin=dict(l=20, r=20, t=50, b=20),
-        paper_bgcolor="white",
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2),
+
+def _charts_faixas(df_pbi: pd.DataFrame, df_bugs: pd.DataFrame) -> str:
+    """Dois donuts lado a lado: PBI em backlog e bugs abertos por faixa de dias."""
+    fig = make_subplots(
+        rows=1, cols=2,
+        specs=[[{"type": "pie"}, {"type": "pie"}]],
+        subplot_titles=["PBI em Backlog × Dias em Aberto", "Bugs Abertos × Dias em Aberto"],
     )
-    include_js = "cdn" if first else False
-    return fig.to_html(full_html=False, include_plotlyjs=include_js)
+
+    def _add_pie(df_open: pd.DataFrame, col: int) -> None:
+        counts = _counts_faixas(df_open)
+        fig.add_trace(go.Pie(
+            labels=counts["faixa"],
+            values=counts["count"],
+            hole=0.4,
+            textinfo="label+percent",
+            textposition="outside",
+            hovertemplate="%{label}<br>%{value} itens (%{percent})<extra></extra>",
+            sort=False,
+            showlegend=False,
+        ), row=1, col=col)
+
+    if not df_pbi.empty:
+        _add_pie(df_pbi, 1)
+    if not df_bugs.empty:
+        _add_pie(df_bugs, 2)
+
+    fig.update_layout(
+        height=440,
+        margin=dict(l=40, r=40, t=60, b=20),
+        paper_bgcolor="white",
+    )
+    return fig.to_html(full_html=False, include_plotlyjs="cdn")
 
 
 _HTML_TEMPLATE = """<!DOCTYPE html>
@@ -82,7 +98,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
         .card .unit {{ font-size: 0.85rem; color: #aaa; margin-top: 0.1rem; }}
         .card.warn .value {{ color: #e74c3c; }}
         .card.ok .value {{ color: #27ae60; }}
-        .charts {{ display: flex; flex-direction: column; gap: 1rem; }}
+        .charts {{ background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }}
     </style>
 </head>
 <body>
@@ -111,8 +127,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
     <div class="charts">
-        {chart_pbi}
-        {chart_bugs}
+        {charts}
     </div>
 </body>
 </html>"""
@@ -122,7 +137,7 @@ def generate_html_report(input_path: str, output_path: str, summary: dict, proje
     """
     Lê o CSV extraído e gera relatório HTML focado em PBIs e Bugs.
     Cards: lead time PBI, backlog PBI, concluídos PBI, taxa de retrabalho.
-    Gráficos: PBI e Bugs por faixa de dias em aberto.
+    Gráficos: PBI e Bugs por faixa de dias em aberto (donuts lado a lado).
     """
     df = pd.read_csv(input_path)
     df_work = df[~df["type"].str.lower().isin(EXCLUDE_TYPES)]
@@ -146,16 +161,7 @@ def generate_html_report(input_path: str, output_path: str, summary: dict, proje
     pbi_total = len(pbi)
     rework_pct = round(len(bugs) / pbi_total * 100, 1) if pbi_total > 0 else 0
 
-    chart_pbi = (
-        _chart_faixas(pbi_backlog, "PBI em Backlog × Dias em Aberto", "#4e79a7", first=True)
-        if not pbi_backlog.empty
-        else "<p>Nenhum PBI em backlog.</p>"
-    )
-    chart_bugs = (
-        _chart_faixas(bugs_open, "Bugs Abertos × Dias em Aberto", "#e15759", first=False)
-        if not bugs_open.empty
-        else "<p>Nenhum bug em aberto.</p>"
-    )
+    charts = _charts_faixas(pbi_backlog, bugs_open)
 
     html = _HTML_TEMPLATE.format(
         project=project,
@@ -168,8 +174,7 @@ def generate_html_report(input_path: str, output_path: str, summary: dict, proje
         rework_pct=rework_pct,
         rework=len(bugs),
         pbi_total=pbi_total,
-        chart_pbi=chart_pbi,
-        chart_bugs=chart_bugs,
+        charts=charts,
     )
 
     with open(output_path, "w", encoding="utf-8") as f:

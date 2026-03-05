@@ -66,8 +66,23 @@ EXCLUDE_TYPES=Test Plan,Test Suite,Test Case
 | `REWORK_TYPES` | Tipos de work item que contam como retrabalho (separados por vírgula) | `Bug` |
 | `REWORK_STATES` | Estados que indicam retrabalho, independente do tipo (separados por vírgula) | `Reopened` |
 | `EXCLUDE_TYPES` | Tipos excluídos da análise de backlog — artefatos de QA (separados por vírgula) | `Test Plan,Test Suite,Test Case` |
+| `GCS_BUCKET` | Nome do bucket GCS para upload (opcional — omitir desativa o upload) | — |
+| `GCS_PREFIX` | Prefixo dos blobs no bucket | `azure-snapshot` |
 
 O PAT pode ser gerado em: `User Settings > Personal Access Tokens` no Azure DevOps.
+
+### Upload para o GCS (opcional)
+
+Quando `GCS_BUCKET` está configurado:
+
+- `make fetch` salva o CSV localmente e faz upload do Parquet para `gs://BUCKET/PREFIX/work_items_YYYY-MM-DD.parquet`
+- `make report` faz upload do HTML para `gs://BUCKET/PREFIX/report.html`
+
+A autenticação usa as credenciais padrão do GCP (Application Default Credentials). Em ambiente local, configure com:
+
+```bash
+gcloud auth application-default login
+```
 
 ### Configuração por processo
 
@@ -97,7 +112,7 @@ DONE_STATES=Closed,Resolved
 
 ```bash
 make fetch    # extrai work items e salva CSV em output/
-make report   # lê o CSV mais recente e gera output/report.txt e output/report.html
+make report   # lê o CSV mais recente e gera output/report.html
 ```
 
 **Sem Docker:**
@@ -116,8 +131,9 @@ app/
 ├── cli.py          # entry point dos comandos
 ├── config.py       # leitura das variáveis de ambiente
 ├── extract.py      # integração com a API do Azure DevOps
-├── transform.py    # cálculo de backlog e retrabalho (gera report.txt)
-└── report_html.py  # geração do relatório HTML com gráficos interativos
+├── transform.py    # cálculo de backlog e retrabalho
+├── report_html.py  # geração do relatório HTML com gráficos interativos
+└── storage.py      # upload para o Google Cloud Storage
 ```
 
 Os arquivos gerados ficam em `output/`:
@@ -125,6 +141,5 @@ Os arquivos gerados ficam em `output/`:
 ```
 output/
 ├── work_items_YYYY-MM-DD.csv   # dados brutos extraídos do Azure DevOps
-├── report.txt                  # relatório em texto
 └── report.html                 # relatório visual com gráficos (abrir no browser)
 ```

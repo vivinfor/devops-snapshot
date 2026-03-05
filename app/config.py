@@ -36,3 +36,7 @@ EXCLUDE_TYPES = {
     t.strip().lower()
     for t in os.getenv("EXCLUDE_TYPES", "Test Plan,Test Suite,Test Case").split(",")
 }
+
+# GCS — opcionais: upload só ocorre se GCS_BUCKET estiver configurado
+GCS_BUCKET = os.getenv("GCS_BUCKET")
+GCS_PREFIX = os.getenv("GCS_PREFIX", "azure-snapshot").strip("/")
