@@ -1,12 +1,12 @@
 # azure-snapshot
 
-Ferramenta para extrair métricas do Azure DevOps e gerar relatórios locais de backlog e retrabalho.
+Ferramenta para extrair métricas do Azure DevOps e gerar relatórios de backlog e retrabalho.
 
 ## Para que serve
 
 Equipes que usam Azure DevOps acumulam dados valiosos sobre o andamento dos projetos, mas acessar essas informações de forma consolidada exige navegação manual entre boards, filtros e relatórios espalhados.
 
-O azure-snapshot resolve isso: com um único comando, ele extrai os work items do projeto, analisa o estado do backlog e identifica itens de retrabalho (bugs, erros, impedimentos), entregando um relatório pronto para uso.
+O azure-snapshot resolve isso: com um único comando, extrai os work items dos projetos configurados, analisa o estado do backlog e identifica retrabalho, entregando um relatório HTML consolidado pronto para uso.
 
 **Quem se beneficia:**
 
@@ -18,9 +18,10 @@ O azure-snapshot resolve isso: com um único comando, ele extrai os work items d
 
 **O que o relatório mostra:**
 
-- Cards de resumo: PBIs em backlog, PBIs concluídos, lead time médio e taxa de retrabalho
-- Gráfico de distribuição de PBIs em backlog por faixa de dias em aberto (0-10, 11-25, 26-35, >35 dias)
-- Gráfico de distribuição de bugs abertos por faixa de dias em aberto
+- Cards de resumo: PBIs em backlog, PBIs concluídos, lead time médio (dos concluídos) e taxa de retrabalho
+- Tabela de PBIs em backlog por faixa de dias em aberto (0-10, 11-25, 26-35, >35 dias)
+- Tabela de bugs abertos por faixa de dias em aberto
+- Tabela comparativa de PBI em aberto por projeto (apenas quando há mais de um projeto configurado)
 
 ---
 
@@ -45,7 +46,7 @@ Conteúdo do `env/dev/env.yaml`:
 
 ```env
 AZURE_DEVOPS_ORG=sua-organização
-AZURE_DEVOPS_PROJECT=seu-projeto
+AZURE_DEVOPS_PROJECT=Projeto A,Projeto B
 AZURE_DEVOPS_PAT=seu-personal-access-token
 OUTPUT_DIR=output
 
@@ -59,13 +60,13 @@ EXCLUDE_TYPES=Test Plan,Test Suite,Test Case
 | Variável | Descrição | Padrão |
 |---|---|---|
 | `AZURE_DEVOPS_ORG` | Nome da organização (aparece na URL do Azure DevOps) | — |
-| `AZURE_DEVOPS_PROJECT` | Nome do projeto dentro da organização | — |
+| `AZURE_DEVOPS_PROJECT` | Um ou mais projetos separados por vírgula | — |
 | `AZURE_DEVOPS_PAT` | Personal Access Token com permissão de leitura em Work Items | — |
 | `OUTPUT_DIR` | Diretório de saída | `output` |
 | `DONE_STATES` | Estados que indicam item concluído (separados por vírgula) | `Done,Closed,Resolved` |
 | `REWORK_TYPES` | Tipos de work item que contam como retrabalho (separados por vírgula) | `Bug` |
 | `REWORK_STATES` | Estados que indicam retrabalho, independente do tipo (separados por vírgula) | `Reopened` |
-| `EXCLUDE_TYPES` | Tipos excluídos da análise de backlog — artefatos de QA (separados por vírgula) | `Test Plan,Test Suite,Test Case` |
+| `EXCLUDE_TYPES` | Tipos ignorados na análise — não entram em nenhum cálculo (separados por vírgula) | `Test Plan,Test Suite,Test Case` |
 | `GCS_BUCKET` | Nome do bucket GCS para upload (opcional — omitir desativa o upload) | — |
 | `GCS_PREFIX` | Prefixo dos blobs no bucket | `azure-snapshot` |
 
@@ -75,7 +76,7 @@ O PAT pode ser gerado em: `User Settings > Personal Access Tokens` no Azure DevO
 
 Quando `GCS_BUCKET` está configurado:
 
-- `make fetch` salva o CSV localmente e faz upload do Parquet para `gs://BUCKET/PREFIX/work_items_YYYY-MM-DD.parquet`
+- `make fetch` salva o CSV localmente e faz upload do Parquet para `gs://BUCKET/PREFIX/{projeto}/work_items_YYYY-MM-DD.parquet`
 - `make report` faz upload do HTML para `gs://BUCKET/PREFIX/report.html`
 
 A autenticação usa as credenciais padrão do GCP (Application Default Credentials). Em ambiente local, configure com:
@@ -83,6 +84,8 @@ A autenticação usa as credenciais padrão do GCP (Application Default Credenti
 ```bash
 gcloud auth application-default login
 ```
+
+Com um Cloud Run Job agendado, o dado cai automaticamente no bucket e fica disponível para conectar no BigQuery, Power BI ou Looker Studio, sem pipeline adicional.
 
 ### Configuração por processo
 
@@ -111,8 +114,8 @@ DONE_STATES=Closed,Resolved
 **Com Docker:**
 
 ```bash
-make fetch    # extrai work items e salva CSV em output/
-make report   # lê o CSV mais recente e gera output/report.html
+make fetch    # extrai work items e salva CSVs em output/
+make report   # lê os CSVs mais recentes e gera output/report.html
 ```
 
 **Sem Docker:**
@@ -132,7 +135,7 @@ app/
 ├── config.py       # leitura das variáveis de ambiente
 ├── extract.py      # integração com a API do Azure DevOps
 ├── transform.py    # cálculo de backlog e retrabalho
-├── report_html.py  # geração do relatório HTML com gráficos interativos
+├── report_html.py  # geração do relatório HTML
 └── storage.py      # upload para o Google Cloud Storage
 ```
 
@@ -140,6 +143,6 @@ Os arquivos gerados ficam em `output/`:
 
 ```
 output/
-├── work_items_YYYY-MM-DD.csv   # dados brutos extraídos do Azure DevOps
-└── report.html                 # relatório visual com gráficos (abrir no browser)
+├── work_items_{projeto}_{YYYY-MM-DD}.csv   # dados brutos por projeto
+└── report.html                              # relatório consolidado de todos os projetos
 ```

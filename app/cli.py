@@ -1,5 +1,6 @@
 import logging
 import re
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -24,7 +25,9 @@ def _ensure_output_dir() -> Path:
 
 def _slug(project: str) -> str:
     """Converte nome do projeto em slug para uso em nomes de arquivo."""
-    return re.sub(r"[^a-z0-9]+", "-", project.lower()).strip("-")
+    normalized = unicodedata.normalize("NFD", project)
+    ascii_str = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "-", ascii_str.lower()).strip("-")
 
 
 @app.command()
@@ -62,7 +65,7 @@ def fetch():
 
 @app.command()
 def report():
-    """Lê os CSVs mais recentes e gera relatório HTML por projeto."""
+    """Lê os CSVs mais recentes e gera um único relatório HTML consolidado."""
     from app.transform import compute_summary
     from app.report_html import generate_html_report
 
@@ -72,6 +75,7 @@ def report():
         console.print("[red]Error: AZURE_DEVOPS_PROJECT não configurado.[/red]")
         raise typer.Exit(1)
 
+    projects_data = []
     for project in config.PROJECTS:
         slug = _slug(project)
         csvs = sorted(output_dir.glob(f"work_items_{slug}_*.csv"), reverse=True)
@@ -81,31 +85,34 @@ def report():
             continue
 
         input_path = csvs[0]
-        html_path = output_dir / f"report_{slug}.html"
-
-        console.print(f"Generating report for [bold]{project}[/bold] from {input_path.name}...")
         summary = compute_summary(str(input_path))
-        generate_html_report(str(input_path), str(html_path), summary, project)
+        projects_data.append({"project": project, "input_path": str(input_path), "summary": summary})
 
         table = Table(title=f"Azure DevOps Snapshot — {project}")
         table.add_column("Metric", style="cyan")
         table.add_column("Value", justify="right")
         table.add_row("Total work items", str(summary["total"]))
-        table.add_row("Excluded (test artifacts)", str(summary["excluded"]))
+        table.add_row("Ignored", str(summary["excluded"]))
         table.add_row("Backlog (not done)", str(summary["backlog"]))
         table.add_row("Done", str(summary["done"]))
         table.add_row("Rework", str(summary["rework"]))
         table.add_row("Rework %", f"{summary['rework_pct']}%")
-
         console.print(table)
-        console.print(f"[green]Report saved to[/green] [bold]{html_path}[/bold] [cyan](open in browser)[/cyan]")
 
-        if config.GCS_BUCKET:
-            from app.storage import upload_to_gcs
+    if not projects_data:
+        raise typer.Exit(1)
 
-            blob_name = f"{config.GCS_PREFIX}/{slug}/report.html"
-            uri = upload_to_gcs(str(html_path), config.GCS_BUCKET, blob_name)
-            console.print(f"  · [cyan]HTML uploaded to[/cyan] [bold]{uri}[/bold]")
+    html_path = output_dir / "report.html"
+    console.print(f"Generating report for [bold]{len(projects_data)} project(s)[/bold]...")
+    generate_html_report(projects_data, str(html_path))
+    console.print(f"[green]Report saved to[/green] [bold]{html_path}[/bold] [cyan](open in browser)[/cyan]")
+
+    if config.GCS_BUCKET:
+        from app.storage import upload_to_gcs
+
+        blob_name = f"{config.GCS_PREFIX}/report.html"
+        uri = upload_to_gcs(str(html_path), config.GCS_BUCKET, blob_name)
+        console.print(f"  · [cyan]HTML uploaded to[/cyan] [bold]{uri}[/bold]")
 
 
 if __name__ == "__main__":

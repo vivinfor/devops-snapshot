@@ -10,14 +10,14 @@ logger = logging.getLogger(__name__)
 def compute_summary(input_path: str) -> dict:
     """
     Lê o CSV extraído e retorna o resumo de backlog e retrabalho.
-    Exclui artefatos de teste da análise.
+    Exclui os tipos configurados em EXCLUDE_TYPES da análise.
     """
     df = pd.read_csv(input_path)
     logger.info("Loaded %d work items from %s", len(df), input_path)
 
     excluded = df[df["type"].str.lower().isin(EXCLUDE_TYPES)]
     df_work = df[~df["type"].str.lower().isin(EXCLUDE_TYPES)]
-    logger.info("Excluded %d test artifacts. Analyzing %d work items.", len(excluded), len(df_work))
+    logger.info("Excluded %d items. Analyzing %d work items.", len(excluded), len(df_work))
 
     backlog = df_work[~df_work["state"].str.lower().isin(DONE_STATES)]
 
