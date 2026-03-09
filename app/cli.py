@@ -1,5 +1,5 @@
 import logging
-import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -22,77 +22,90 @@ def _ensure_output_dir() -> Path:
     return output
 
 
+def _slug(project: str) -> str:
+    """Converte nome do projeto em slug para uso em nomes de arquivo."""
+    return re.sub(r"[^a-z0-9]+", "-", project.lower()).strip("-")
+
+
 @app.command()
 def fetch():
-    """Extrai work items do Azure DevOps e salva CSV local."""
+    """Extrai work items de todos os projetos configurados e salva CSVs locais."""
     from app.extract import fetch_and_save
 
-    if not all([config.ORGANIZATION, config.PROJECT, config.PAT]):
+    if not all([config.ORGANIZATION, config.PROJECTS, config.PAT]):
         console.print("[red]Error: AZURE_DEVOPS_ORG, AZURE_DEVOPS_PROJECT e AZURE_DEVOPS_PAT são obrigatórios.[/red]")
         raise typer.Exit(1)
 
     output_dir = _ensure_output_dir()
     today = datetime.now().strftime("%Y-%m-%d")
-    output_path = output_dir / f"work_items_{today}.csv"
 
-    console.print(f"Fetching work items from [bold]{config.ORGANIZATION}/{config.PROJECT}[/bold]...")
-    count = fetch_and_save(str(output_path))
-    console.print(f"[green]Done.[/green] {count} work items saved to [bold]{output_path}[/bold]")
+    for project in config.PROJECTS:
+        slug = _slug(project)
+        output_path = output_dir / f"work_items_{slug}_{today}.csv"
 
-    if config.GCS_BUCKET:
-        import pandas as pd
-        from app.storage import upload_to_gcs
+        console.print(f"Fetching work items from [bold]{config.ORGANIZATION}/{project}[/bold]...")
+        count = fetch_and_save(str(output_path), project)
+        console.print(f"[green]Done.[/green] {count} work items saved to [bold]{output_path}[/bold]")
 
-        parquet_path = output_dir / f"work_items_{today}.parquet"
-        pd.read_csv(str(output_path)).to_parquet(str(parquet_path), index=False)
+        if config.GCS_BUCKET:
+            import pandas as pd
+            from app.storage import upload_to_gcs
 
-        blob_name = f"{config.GCS_PREFIX}/work_items_{today}.parquet"
-        uri = upload_to_gcs(str(parquet_path), config.GCS_BUCKET, blob_name)
-        parquet_path.unlink()
-        console.print(f"  · [cyan]Parquet uploaded to[/cyan] [bold]{uri}[/bold]")
+            parquet_path = output_dir / f"work_items_{slug}_{today}.parquet"
+            pd.read_csv(str(output_path)).to_parquet(str(parquet_path), index=False)
+
+            blob_name = f"{config.GCS_PREFIX}/{slug}/work_items_{today}.parquet"
+            uri = upload_to_gcs(str(parquet_path), config.GCS_BUCKET, blob_name)
+            parquet_path.unlink()
+            console.print(f"  · [cyan]Parquet uploaded to[/cyan] [bold]{uri}[/bold]")
 
 
 @app.command()
 def report():
-    """Lê o CSV mais recente e gera relatório HTML de backlog e retrabalho."""
+    """Lê os CSVs mais recentes e gera relatório HTML por projeto."""
     from app.transform import compute_summary
-
-    output_dir = _ensure_output_dir()
-    csvs = sorted(output_dir.glob("work_items_*.csv"), reverse=True)
-
-    if not csvs:
-        console.print("[red]No data found. Run 'fetch' first.[/red]")
-        raise typer.Exit(1)
-
-    input_path = csvs[0]
-
     from app.report_html import generate_html_report
 
-    console.print(f"Generating report from [bold]{input_path.name}[/bold]...")
-    summary = compute_summary(str(input_path))
+    output_dir = _ensure_output_dir()
 
-    html_path = output_dir / "report.html"
-    generate_html_report(str(input_path), str(html_path), summary, config.PROJECT or "Azure DevOps")
+    if not config.PROJECTS:
+        console.print("[red]Error: AZURE_DEVOPS_PROJECT não configurado.[/red]")
+        raise typer.Exit(1)
 
-    table = Table(title="Azure DevOps Snapshot")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", justify="right")
-    table.add_row("Total work items", str(summary["total"]))
-    table.add_row("Excluded (test artifacts)", str(summary["excluded"]))
-    table.add_row("Backlog (not done)", str(summary["backlog"]))
-    table.add_row("Done", str(summary["done"]))
-    table.add_row("Rework", str(summary["rework"]))
-    table.add_row("Rework %", f"{summary['rework_pct']}%")
+    for project in config.PROJECTS:
+        slug = _slug(project)
+        csvs = sorted(output_dir.glob(f"work_items_{slug}_*.csv"), reverse=True)
 
-    console.print(table)
-    console.print(f"[green]Report saved to[/green] [bold]{output_dir}/report.html[/bold] [cyan](open in browser)[/cyan]")
+        if not csvs:
+            console.print(f"[yellow]No data for '{project}'. Run 'fetch' first.[/yellow]")
+            continue
 
-    if config.GCS_BUCKET:
-        from app.storage import upload_to_gcs
+        input_path = csvs[0]
+        html_path = output_dir / f"report_{slug}.html"
 
-        blob_name = f"{config.GCS_PREFIX}/report.html"
-        uri = upload_to_gcs(str(html_path), config.GCS_BUCKET, blob_name)
-        console.print(f"  · [cyan]HTML uploaded to[/cyan] [bold]{uri}[/bold]")
+        console.print(f"Generating report for [bold]{project}[/bold] from {input_path.name}...")
+        summary = compute_summary(str(input_path))
+        generate_html_report(str(input_path), str(html_path), summary, project)
+
+        table = Table(title=f"Azure DevOps Snapshot — {project}")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+        table.add_row("Total work items", str(summary["total"]))
+        table.add_row("Excluded (test artifacts)", str(summary["excluded"]))
+        table.add_row("Backlog (not done)", str(summary["backlog"]))
+        table.add_row("Done", str(summary["done"]))
+        table.add_row("Rework", str(summary["rework"]))
+        table.add_row("Rework %", f"{summary['rework_pct']}%")
+
+        console.print(table)
+        console.print(f"[green]Report saved to[/green] [bold]{html_path}[/bold] [cyan](open in browser)[/cyan]")
+
+        if config.GCS_BUCKET:
+            from app.storage import upload_to_gcs
+
+            blob_name = f"{config.GCS_PREFIX}/{slug}/report.html"
+            uri = upload_to_gcs(str(html_path), config.GCS_BUCKET, blob_name)
+            console.print(f"  · [cyan]HTML uploaded to[/cyan] [bold]{uri}[/bold]")
 
 
 if __name__ == "__main__":

@@ -4,8 +4,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ORGANIZATION = os.getenv("AZURE_DEVOPS_ORG")
-PROJECT = os.getenv("AZURE_DEVOPS_PROJECT")
 PAT = os.getenv("AZURE_DEVOPS_PAT")
+
+# Aceita um ou mais projetos separados por vírgula
+PROJECTS = [p.strip() for p in os.getenv("AZURE_DEVOPS_PROJECT", "").split(",") if p.strip()]
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
 

@@ -4,7 +4,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from app.config import ORGANIZATION, PROJECT, PAT
+from app.config import ORGANIZATION, PAT
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +23,12 @@ FIELDS = [
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(2))
-def _fetch_work_item_ids() -> list[int]:
-    """Busca todos os IDs de work items via WIQL."""
-    url = f"https://dev.azure.com/{ORGANIZATION}/{PROJECT}/_apis/wit/wiql?api-version=6.0"
+def _fetch_work_item_ids(project: str) -> list[int]:
+    """Busca todos os IDs de work items do projeto via WIQL."""
+    url = f"https://dev.azure.com/{ORGANIZATION}/{project}/_apis/wit/wiql?api-version=6.0"
     response = requests.post(
         url,
-        json={"query": "SELECT [System.Id] FROM workitems"},
+        json={"query": "SELECT [System.Id] FROM workitems WHERE [System.TeamProject] = @project"},
         headers=HEADERS,
         auth=AUTH,
         timeout=10,
@@ -38,9 +38,9 @@ def _fetch_work_item_ids() -> list[int]:
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(2))
-def _fetch_batch(ids: list[int]) -> list[dict]:
+def _fetch_batch(project: str, ids: list[int]) -> list[dict]:
     """Busca detalhes de um lote de work items (máximo 200)."""
-    url = f"https://dev.azure.com/{ORGANIZATION}/{PROJECT}/_apis/wit/workitemsbatch?api-version=6.0"
+    url = f"https://dev.azure.com/{ORGANIZATION}/{project}/_apis/wit/workitemsbatch?api-version=6.0"
     response = requests.post(
         url,
         json={"ids": ids, "fields": FIELDS},
@@ -52,13 +52,13 @@ def _fetch_batch(ids: list[int]) -> list[dict]:
     return response.json().get("value", [])
 
 
-def fetch_and_save(output_path: str) -> int:
+def fetch_and_save(output_path: str, project: str) -> int:
     """
-    Extrai todos os work items do Azure DevOps em lotes e salva em CSV.
+    Extrai todos os work items do projeto em lotes e salva em CSV.
     Retorna a quantidade de itens salvos.
     """
     logger.info("Fetching work item IDs from Azure DevOps...")
-    ids = _fetch_work_item_ids()
+    ids = _fetch_work_item_ids(project)
     if not ids:
         logger.warning("No work items found.")
         return 0
@@ -71,7 +71,7 @@ def fetch_and_save(output_path: str) -> int:
     for i in range(0, len(ids), BATCH_SIZE):
         batch = ids[i:i + BATCH_SIZE]
         logger.info("Fetching batch %d-%d...", i + 1, i + len(batch))
-        items = _fetch_batch(batch)
+        items = _fetch_batch(project, batch)
         for item in items:
             f = item.get("fields", {})
             rows.append({
